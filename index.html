@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1d5fd1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Весовой">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Весовой контроль — навигатор</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+/* Раскладка: карта на весь экран, сверху оповещение, снизу панель с тремя кнопками. */
+:root{
+  --bg:#f2f4f6; --surface:#ffffff; --ink:#14181d; --muted:#5b6670; --line:#d7dce1;
+  --accent:#1d5fd1; --on-accent:#ffffff;
+  --work:#d6342b; --free:#1f9d55; --unk:#7b8794;
+  --shadow:0 4px 18px rgba(10,20,30,.22);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#12161a; --surface:#1b2127; --ink:#eef1f4; --muted:#9aa6b2; --line:#2b343c;
+    --accent:#5b9bff; --on-accent:#0b1220;
+    --work:#ff5c52; --free:#3ccf7a; --unk:#8795a3;
+    --shadow:0 4px 18px rgba(0,0,0,.5);
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;overflow:hidden}
+#map{position:fixed;inset:0;background:var(--bg)}
+button,select,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+.chip{position:fixed;left:max(12px,env(safe-area-inset-left,0px));top:max(12px,env(safe-area-inset-top,0px));z-index:900;
+  background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px;color:var(--muted);box-shadow:var(--shadow);max-width:calc(100% - 90px)}
+#alert{position:fixed;z-index:950;left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));
+  top:calc(max(12px,env(safe-area-inset-top,0px)) + 44px);background:var(--work);color:#fff;border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
+#alert .big{font-size:26px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+#alert .sub{font-size:14px;opacity:.95;margin-top:4px}
+
+.leaflet-top.leaflet-right{margin-top:env(safe-area-inset-top,0px)}
+.leaflet-control-zoom a{width:40px!important;height:40px!important;line-height:40px!important}
+
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:960;display:flex;gap:8px;
+  padding:10px max(12px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));
+  background:var(--surface);border-top:1px solid var(--line)}
+.bar button{flex:1;min-height:52px;border:1px solid var(--line);background:var(--bg);border-radius:12px;font-weight:600}
+.bar button.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);flex:1.4}
+.bar button.icon{flex:0 0 52px;font-size:22px}
+.bar button.on{outline:2px solid var(--accent)}
+
+#panel{position:fixed;left:0;right:0;z-index:955;bottom:calc(72px + env(safe-area-inset-bottom,0px));max-height:58vh;overflow:auto;
+  background:var(--surface);border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:var(--shadow);
+  padding:14px max(16px,env(safe-area-inset-right,0px)) 16px max(16px,env(safe-area-inset-left,0px))}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.ph b{font-size:18px}
+.ph button{border:0;background:none;color:var(--accent);font-weight:600;padding:8px}
+
+.pin{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;color:#fff;font-weight:800;font-size:15px;
+  border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.s-work{background:var(--work)} .s-free{background:var(--free)} .s-unk{background:var(--unk)}
+
+.row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;padding:10px 0}
+.row .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.row .rt b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row small{color:var(--muted)}
+.row .rd{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.empty{color:var(--muted)}
+
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+select,input[type=text],textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+textarea{min-height:90px;font:13px/1.3 ui-monospace,Menlo,Consolas,monospace}
+.check{display:flex;align-items:center;gap:10px;color:var(--ink);font-size:16px;margin:12px 0 0}
+.check input{width:22px;height:22px}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.btns button{flex:1;min-width:130px;min-height:48px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:600}
+.btns button.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.hint{font-size:13px;color:var(--muted);margin-top:8px}
+.warn{font-size:12px;color:var(--muted);margin-top:14px}
+
+.pp{min-width:210px}
+.pp .pm{color:var(--muted);font-size:13px;margin:2px 0 6px}
+.pp .pb{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.pp .pb button{flex:1;padding:8px 10px;border-radius:8px;border:1px solid #c9d0d6;background:#f6f7f8;color:#14181d;font-weight:600}
+.pp .pb .ghost{flex-basis:100%;color:#b3261e}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="chip" id="gps">GPS: ищу сигнал…</div>
+<div id="alert" hidden role="alert"></div>
+
+<section id="panel" hidden>
+  <div class="ph"><b id="ptitle"></b><button id="pclose" type="button">Закрыть</button></div>
+
+  <div id="secList" hidden>
+    <div id="list"></div>
+  </div>
+
+  <div id="secAdd" hidden>
+    <div class="hint" id="pointInfo"></div>
+    <label for="fType">Тип поста</label>
+    <select id="fType">
+      <option value="fixed">Стационарный пост (СПВК)</option>
+      <option value="mobile">Мобильный пост</option>
+      <option value="frame">Рамка / камера</option>
+    </select>
+    <label for="fName">Название (необязательно)</label>
+    <input type="text" id="fName" placeholder="Например, М-4, 1020 км">
+    <label for="fNote">Заметка (необязательно)</label>
+    <input type="text" id="fNote" placeholder="Например, проверяют только фуры с прицепом">
+    <div class="btns">
+      <button type="button" id="fSave" class="primary">Сохранить пост</button>
+      <button type="button" id="fCancel">Отмена</button>
+    </div>
+  </div>
+
+  <div id="secSet" hidden>
+    <label for="sRadius">Предупреждать за</label>
+    <select id="sRadius">
+      <option value="3">3 км</option>
+      <option value="5">5 км</option>
+      <option value="10">10 км</option>
+      <option value="20">20 км</option>
+    </select>
+    <label class="check"><input type="checkbox" id="sSound"> Звук при приближении</label>
+    <label class="check"><input type="checkbox" id="sTest"> Тест без GPS (касание карты = «я здесь»)</label>
+    <div class="btns">
+      <button type="button" id="sDemo">Удалить демо-точки</button>
+    </div>
+    <label for="sData">Данные постов (чтобы перенести на другой телефон)</label>
+    <textarea id="sData" spellcheck="false"></textarea>
+    <div class="btns">
+      <button type="button" id="sExport">Показать данные</button>
+      <button type="button" id="sImport">Загрузить из поля</button>
+    </div>
+    <div class="hint" id="sMsg"></div>
+    <div class="warn">Пользуйтесь приложением только на остановке. Демо-точки поставлены для примера и не являются реальными постами.</div>
+  </div>
+</section>
+
+<nav class="bar">
+  <button type="button" id="bList">Рядом</button>
+  <button type="button" id="bAdd" class="primary">＋ Пост</button>
+  <button type="button" id="bSet">Настройки</button>
+  <button type="button" id="bLoc" class="icon on" aria-label="Следовать за мной">◎</button>
+</nav>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+(function(){
+'use strict';
+
+/* ---------- утилиты ---------- */
+var KEY='wc_posts_v1', SKEY='wc_settings_v1';
+var TYPES={fixed:{l:'Стационарный пост',s:'С'},mobile:{l:'Мобильный пост',s:'М'},frame:{l:'Рамка / камера',s:'К'}};
+var STAT={work:'Работает',free:'Не работает',unk:'Не проверен'};
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function sget(k,def){try{var v=localStorage.getItem(k);return v?JSON.parse(v):def;}catch(e){return def;}}
+function sset(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function uid(){return 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+var R=6371000;
+function rad(x){return x*Math.PI/180;}
+function dist(a,b,c,d){var p=rad(c-a),q=rad(d-b);var h=Math.sin(p/2)*Math.sin(p/2)+Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(q/2)*Math.sin(q/2);return 2*R*Math.asin(Math.sqrt(h));}
+function bearing(a,b,c,d){var y=Math.sin(rad(d-b))*Math.cos(rad(c));var x=Math.cos(rad(a))*Math.sin(rad(c))-Math.sin(rad(a))*Math.cos(rad(c))*Math.cos(rad(d-b));return (Math.atan2(y,x)*180/Math.PI+360)%360;}
+function angDiff(a,b){var d=Math.abs(a-b)%360;return d>180?360-d:d;}
+function fmtDist(m){if(m<1000)return (Math.round(m/10)*10)+' м';return (m/1000).toFixed(m<10000?1:0).replace('.',',')+' км';}
+function ago(t){if(!t)return 'нет отметок';var m=Math.round((Date.now()-t)/60000);if(m<1)return 'только что';if(m<60)return m+' мин назад';var h=Math.round(m/60);if(h<24)return h+' ч назад';return Math.round(h/24)+' дн назад';}
+
+/* ---------- данные ---------- */
+var DEMO=[
+  ['Демо: М-4, юг Московской обл.',55.30,37.75,'fixed'],
+  ['Демо: М-7, Нижегородская обл.',56.20,43.90,'fixed'],
+  ['Демо: Казань, въезд',55.80,49.20,'mobile'],
+  ['Демо: Екатеринбург, объезд',56.80,60.75,'fixed'],
+  ['Демо: Новосибирск, М-51',55.00,82.70,'frame'],
+  ['Демо: Краснодар, М-4',45.10,39.00,'fixed']
+];
+var posts=sget(KEY,null);
+if(!Array.isArray(posts)){
+  posts=DEMO.map(function(d){return {id:uid(),name:d[0],lat:d[1],lon:d[2],type:d[3],status:'unk',updated:0,note:'',demo:true};});
+  sset(KEY,posts);
+}
+var cfg=sget(SKEY,{radius:5,sound:true,test:false});
+function save(){sset(KEY,posts);}
+function saveCfg(){sset(SKEY,cfg);}
+
+/* ---------- карта ---------- */
+var map=L.map('map',{zoomControl:false}).setView([61,90],3);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
+L.control.zoom({position:'topright'}).addTo(map);
+var layer=L.layerGroup().addTo(map);
+
+function icon(p){
+  return L.divIcon({className:'',html:'<div class="pin s-'+p.status+'">'+TYPES[p.type].s+'</div>',iconSize:[34,34],iconAnchor:[17,17],popupAnchor:[0,-18]});
+}
+function popupHtml(p){
+  return '<div class="pp"><b>'+esc(p.name)+'</b>'
+   +'<div class="pm">'+TYPES[p.type].l+' · '+STAT[p.status]+' · '+ago(p.updated)+'</div>'
+   +(p.note?'<div>'+esc(p.note)+'</div>':'')
+   +(p.demo?'<div class="pm">Демо-точка, не реальный пост</div>':'')
+   +'<div class="pb"><button data-act="work" data-id="'+p.id+'">Работает</button>'
+   +'<button data-act="free" data-id="'+p.id+'">Не работает</button>'
+   +'<button class="ghost" data-act="del" data-id="'+p.id+'">Удалить</button></div></div>';
+}
+function render(){
+  layer.clearLayers();
+  posts.forEach(function(p){
+    var m=L.marker([p.lat,p.lon],{icon:icon(p)});
+    m.bindPopup(function(){return popupHtml(p);});
+    m.addTo(layer);
+  });
+}
+document.addEventListener('click',function(e){
+  var b=e.target.closest('[data-act]'); if(!b)return;
+  var id=b.getAttribute('data-id'), act=b.getAttribute('data-act');
+  var p=posts.filter(function(x){return x.id===id;})[0]; if(!p)return;
+  if(act==='del'){posts=posts.filter(function(x){return x.id!==id;});}
+  else{p.status=act;p.updated=Date.now();}
+  save();render();refreshList();map.closePopup();check();
+});
+
+/* ---------- панели ---------- */
+var current=null;
+var titles={list:'Посты рядом',add:'Новый пост',set:'Настройки'};
+function openPanel(name){
+  if(current===name){closePanel();return;}
+  current=name;
+  $('panel').hidden=false;
+  $('ptitle').textContent=titles[name];
+  $('secList').hidden=name!=='list';
+  $('secAdd').hidden=name!=='add';
+  $('secSet').hidden=name!=='set';
+  if(name==='list')refreshList();
+  if(name==='add')startAdd();
+  if(name!=='add')clearDraft();
+}
+function closePanel(){current=null;$('panel').hidden=true;clearDraft();}
+$('pclose').onclick=closePanel;
+$('bList').onclick=function(){openPanel('list');};
+$('bAdd').onclick=function(){openPanel('add');};
+$('bSet').onclick=function(){openPanel('set');};
+
+/* ---------- список ---------- */
+function refreshList(){
+  if(current!=='list')return;
+  var rows=posts.map(function(p){return {p:p,d:pos?dist(pos.lat,pos.lon,p.lat,p.lon):null};});
+  rows.sort(function(a,b){return pos?a.d-b.d:a.p.name.localeCompare(b.p.name,'ru');});
+  $('list').innerHTML=rows.slice(0,40).map(function(r){
+    return '<button type="button" class="row" data-go="'+r.p.id+'"><span class="pin s-'+r.p.status+'">'+TYPES[r.p.type].s+'</span>'
+      +'<span class="rt"><b>'+esc(r.p.name)+'</b><small>'+STAT[r.p.status]+' · '+ago(r.p.updated)+'</small></span>'
+      +'<span class="rd">'+(r.d!=null?fmtDist(r.d):'')+'</span></button>';
+  }).join('')||'<p class="empty">Постов пока нет. Нажмите «＋ Пост», чтобы добавить первый.</p>';
+}
+document.addEventListener('click',function(e){
+  var b=e.target.closest('[data-go]'); if(!b)return;
+  var p=posts.filter(function(x){return x.id===b.getAttribute('data-go');})[0]; if(!p)return;
+  closePanel(); follow=false; setFollowBtn();
+  map.flyTo([p.lat,p.lon],13);
+});
+
+/* ---------- добавление поста ---------- */
+var draft=null, draftMarker=null;
+function setDraft(lat,lon,src){
+  draft={lat:lat,lon:lon};
+  if(draftMarker)draftMarker.setLatLng([lat,lon]);
+  else draftMarker=L.circleMarker([lat,lon],{radius:11,color:'#1d5fd1',weight:3,fillColor:'#fff',fillOpacity:.9,dashArray:'4 3'}).addTo(map);
+  $('pointInfo').textContent='Точка: '+lat.toFixed(5)+', '+lon.toFixed(5)+(src==='gps'?' (ваше положение)':' (выбрана на карте)')+'. Чтобы сдвинуть, коснитесь карты.';
+}
+function startAdd(){
+  $('fName').value='';$('fNote').value='';$('fType').value='fixed';
+  if(pos)setDraft(pos.lat,pos.lon,'gps');
+  else{draft=null;$('pointInfo').textContent='Положение не определено. Коснитесь карты там, где стоит пост.';}
+}
+function clearDraft(){draft=null;if(draftMarker){map.removeLayer(draftMarker);draftMarker=null;}}
+$('fCancel').onclick=closePanel;
+$('fSave').onclick=function(){
+  if(!draft){$('pointInfo').textContent='Сначала коснитесь карты, чтобы выбрать место поста.';return;}
+  var t=$('fType').value;
+  posts.push({id:uid(),name:$('fName').value.trim()||TYPES[t].l,lat:draft.lat,lon:draft.lon,type:t,status:'work',updated:Date.now(),note:$('fNote').value.trim(),demo:false});
+  save();render();closePanel();check();
+};
+map.on('click',function(e){
+  if(current==='add'){setDraft(e.latlng.lat,e.latlng.lng,'map');return;}
+  if(cfg.test){onPos(e.latlng.lat,e.latlng.lng,0,null);}
+});
+
+/* ---------- настройки ---------- */
+$('sRadius').value=String(cfg.radius);
+$('sSound').checked=!!cfg.sound;
+$('sTest').checked=!!cfg.test;
+$('sRadius').onchange=function(){cfg.radius=+this.value;saveCfg();check();};
+$('sSound').onchange=function(){cfg.sound=this.checked;saveCfg();};
+$('sTest').onchange=function(){cfg.test=this.checked;saveCfg();$('sMsg').textContent=cfg.test?'Коснитесь карты, чтобы поставить себя в любую точку. Двигайте точку и смотрите на оповещения.':'';};
+$('sDemo').onclick=function(){posts=posts.filter(function(p){return !p.demo;});save();render();refreshList();check();$('sMsg').textContent='Демо-точки удалены.';};
+$('sExport').onclick=function(){$('sData').value=JSON.stringify(posts.filter(function(p){return !p.demo;}));$('sMsg').textContent='Скопируйте текст и вставьте его на другом телефоне в это же поле.';};
+$('sImport').onclick=function(){
+  try{
+    var arr=JSON.parse($('sData').value), n=0;
+    if(!Array.isArray(arr))throw 0;
+    arr.forEach(function(p){
+      if(!p||typeof p.lat!=='number'||typeof p.lon!=='number'||!TYPES[p.type])return;
+      var id=/^[A-Za-z0-9]+$/.test(String(p.id))?String(p.id):uid();
+      if(posts.some(function(x){return x.id===id;}))return;
+      posts.push({id:id,name:String(p.name||TYPES[p.type].l).slice(0,80),lat:p.lat,lon:p.lon,type:p.type,status:STAT[p.status]?p.status:'unk',updated:+p.updated||0,note:String(p.note||'').slice(0,160),demo:false});
+      n++;
+    });
+    save();render();check();$('sMsg').textContent='Добавлено постов: '+n+'.';
+  }catch(e){$('sMsg').textContent='Не получилось прочитать данные. Вставьте текст целиком, как он был показан.';}
+};
+
+/* ---------- положение и оповещения ---------- */
+var pos=null,lastPos=null,heading=null,follow=true,userDot=null,firstFix=true,warned={};
+function setFollowBtn(){$('bLoc').classList.toggle('on',follow);}
+$('bLoc').onclick=function(){follow=true;setFollowBtn();if(pos)map.setView([pos.lat,pos.lon],Math.max(map.getZoom(),12));};
+map.on('dragstart',function(){follow=false;setFollowBtn();});
+
+function onPos(lat,lon,acc,hd){
+  if(hd!=null&&isFinite(hd)){heading=hd;lastPos={lat:lat,lon:lon};}
+  else if(!lastPos){lastPos={lat:lat,lon:lon};}
+  else if(dist(lastPos.lat,lastPos.lon,lat,lon)>30){heading=bearing(lastPos.lat,lastPos.lon,lat,lon);lastPos={lat:lat,lon:lon};}
+  pos={lat:lat,lon:lon,acc:acc};
+  if(!userDot)userDot=L.circleMarker([lat,lon],{radius:9,color:'#fff',weight:3,fillColor:'#1d5fd1',fillOpacity:1}).addTo(map);
+  else userDot.setLatLng([lat,lon]);
+  if(follow&&!cfg.test){
+    if(firstFix){map.setView([lat,lon],12);firstFix=false;}
+    else map.panTo([lat,lon],{animate:true});
+  }
+  if(cfg.test)$('gps').textContent='Тест: вы в точке на карте';
+  check();refreshList();
+}
+function onErr(err){
+  var m='GPS недоступен';
+  if(err&&err.code===1)m='GPS: доступ запрещён. Разрешите геопозицию в настройках браузера.';
+  else if(err&&err.code===2)m='GPS: сигнал не найден';
+  else if(err&&err.code===3)m='GPS: ищу сигнал…';
+  $('gps').textContent=m;
+}
+if(navigator.geolocation){
+  navigator.geolocation.watchPosition(function(p){
+    if(cfg.test)return;
+    var c=p.coords;
+    $('gps').textContent='GPS: точность '+Math.round(c.accuracy)+' м';
+    onPos(c.latitude,c.longitude,c.accuracy,(c.heading!=null&&isFinite(c.heading)&&c.speed>1)?c.heading:null);
+  },onErr,{enableHighAccuracy:true,maximumAge:2000,timeout:20000});
+}else{
+  $('gps').textContent='GPS не поддерживается. Включите «Тест без GPS» в настройках.';
+}
+
+var AC=window.AudioContext||window.webkitAudioContext, ac=null;
+document.addEventListener('click',function(){try{ac=ac||new AC();if(ac.resume)ac.resume();}catch(e){}},{once:true});
+function beep(){
+  if(!cfg.sound||!ac)return;
+  try{var o=ac.createOscillator(),g=ac.createGain();o.frequency.value=880;g.gain.value=.15;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.35);}catch(e){}
+}
+function showAlert(p,d){
+  var el=$('alert');
+  if(!p){el.hidden=true;return;}
+  el.hidden=false;
+  el.innerHTML='<div class="big">Весовой контроль через '+fmtDist(d)+'</div><div class="sub">'+esc(p.name)+' · '+STAT[p.status]+(p.updated?' · '+ago(p.updated):'')+'</div>';
+}
+function check(){
+  if(!pos){showAlert(null);return;}
+  var lim=cfg.radius*1000, best=null, bd=Infinity;
+  posts.forEach(function(p){
+    var d=dist(pos.lat,pos.lon,p.lat,p.lon);
+    if(d>lim*1.5)delete warned[p.id];
+    if(d>lim)return;
+    if(p.status==='free'&&Date.now()-p.updated<12*3600e3)return;
+    if(heading!=null&&d>150){
+      var b=bearing(pos.lat,pos.lon,p.lat,p.lon);
+      if(angDiff(b,heading)>75)return;
+    }
+    if(d<bd){bd=d;best=p;}
+  });
+  showAlert(best,bd);
+  if(best&&!warned[best.id]){
+    warned[best.id]=1;beep();
+    try{if(navigator.vibrate)navigator.vibrate([300,150,300]);}catch(e){}
+  }
+}
+
+render();
+setInterval(refreshList,30000);
+if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}
+})();
+</script>
+</body>
+</html>
